@@ -824,16 +824,31 @@ def get_playlist_contents(playlist):
             
             playlist_items.append(item_data)
         
+        # Whether this is a smart playlist, and its filter definition if so
+        is_smart = bool(getattr(playlist, 'smart', False))
+        smart_filter = None
+        if is_smart:
+            try:
+                smart_filter = playlist.filters()
+            except Exception:
+                # A smart playlist whose filter can't be parsed still returns contents
+                smart_filter = None
+
         playlist_info = {
             "title": playlist.title,
             "id": playlist.ratingKey,
             "key": playlist.key,
             "type": playlist.playlistType,
+            "smart": is_smart,
             "summary": playlist.summary if hasattr(playlist, 'summary') else None,
             "duration": playlist.duration if hasattr(playlist, 'duration') else None,
             "itemCount": len(playlist_items),
             "items": playlist_items
         }
+
+        # Include the smart filter definition so it can be read back before editing
+        if smart_filter is not None:
+            playlist_info["smartFilter"] = smart_filter
         
         # Return just the playlist info without status wrappers
         return json.dumps(playlist_info, indent=4)

@@ -122,7 +122,7 @@ Manage your personal and shared playlists.
 | Command | Description | Parameters |
 |---------|-------------|------------|
 | `playlist_list` | List all available playlists. | None |
-| `playlist_get_contents` | List items contained in a playlist. | `playlist_title`, `playlist_id` |
+| `playlist_get_contents` | List items in a playlist; for smart playlists also returns `smart` and the current `smartFilter` definition. | `playlist_title`, `playlist_id` |
 | `playlist_create` | Create a new playlist from items. | `title`, `items: List[str]` |
 | `playlist_delete` | Delete a playlist. | `playlist_title`, `playlist_id` |
 | `playlist_add_to` | Add media items to a playlist. | `playlist_title`, `items: List[str]`, `playlist_id` |
@@ -140,7 +140,8 @@ Smart playlists are saved searches over a **single library** that Plex keeps aut
 
 1. Call `playlist_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. Call it again with a `field` (e.g. `genre`) to list that field's valid values.
 2. Call `playlist_create_smart` with a `filters` dict, e.g. `{"genre": "Comedy", "year>>": 2000, "unwatched": true}`. Append an operator suffix to a field name for comparisons (`year>>` means after that year).
-3. Adjust later with `playlist_edit_smart_filters`.
+3. Read the current definition anytime with `playlist_get_contents` — for a smart playlist it returns `smart: true` and a `smartFilter` object (`libtype`, `sort`, `limit`, `filters`).
+4. Adjust later with `playlist_edit_smart_filters` (it overwrites the filter definition, so read it first if you want to build on the existing one).
 
 > **Note on `libtype`:** it defaults to the section's content type, which is `episode` for TV libraries and `track` for music. Set `libtype` to `show` or `artist` if you want whole shows/artists instead.
 
