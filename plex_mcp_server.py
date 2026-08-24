@@ -81,6 +81,7 @@ from modules.playlist import (
     playlist_delete,
     playlist_add_to,
     playlist_remove_from,
+    playlist_move_item,
     playlist_edit,
     playlist_upload_poster,
     playlist_copy_to_user
