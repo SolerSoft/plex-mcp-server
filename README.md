@@ -130,6 +130,19 @@ Manage your personal and shared playlists.
 | `playlist_edit` | Change playlist title or summary. | `playlist_title`, `new_title`, `new_summary`, `playlist_id` |
 | `playlist_upload_poster` | Upload a custom poster image. | `playlist_title`, `image_path`, `playlist_id` |
 | `playlist_copy_to_user` | Share/Copy a playlist to another user. | `playlist_title`, `username`, `playlist_id` |
+| `playlist_get_smart_filter_options` | Discover filter fields, operators, sort options (and per-field values) for building a smart playlist. | `library_name`, `field` |
+| `playlist_create_smart` | Create a smart playlist that auto-populates from a library filter. | `playlist_title`, `library_name`, `filters: dict`, `sort`, `limit`, `libtype`, `summary` |
+| `playlist_edit_smart_filters` | Update an existing smart playlist's filter definition. | `playlist_title`, `playlist_id`, `filters: dict`, `sort`, `limit` |
+
+#### Smart playlists
+
+Smart playlists are saved searches over a **single library** that Plex keeps auto-populated, rather than a fixed list of items. The typical flow:
+
+1. Call `playlist_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. Call it again with a `field` (e.g. `genre`) to list that field's valid values.
+2. Call `playlist_create_smart` with a `filters` dict, e.g. `{"genre": "Comedy", "year>>": 2000, "unwatched": true}`. Append an operator suffix to a field name for comparisons (`year>>` means after that year).
+3. Adjust later with `playlist_edit_smart_filters`.
+
+> **Note on `libtype`:** it defaults to the section's content type, which is `episode` for TV libraries and `track` for music. Set `libtype` to `show` or `artist` if you want whole shows/artists instead.
 
 ### Collection Module
 Organize movies and shows into collections.
