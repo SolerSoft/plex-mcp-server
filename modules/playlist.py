@@ -796,11 +796,13 @@ def get_playlist_contents(playlist):
     try:
         items = playlist.items()
         playlist_items = []
-        
-        for item in items:
+
+        for position, item in enumerate(items, start=1):
             item_data = {
                 "title": item.title,
                 "type": item.type,
+                "position": position,
+                "playlistItemID": item.playlistItemID if hasattr(item, 'playlistItemID') else None,
                 "ratingKey": item.ratingKey,
                 "addedAt": item.addedAt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'addedAt') else None,
                 "duration": item.duration if hasattr(item, 'duration') else None,
@@ -837,6 +839,67 @@ def get_playlist_contents(playlist):
         return json.dumps(playlist_info, indent=4)
     except Exception as e:
         return json.dumps({"error": f"Error formatting playlist contents: {str(e)}"}, indent=4)
+
+
+@mcp.tool()
+async def playlist_move_item(playlist_title: str = None, playlist_id: int = None,
+                             item_playlist_item_id: int = None, new_position: int = None) -> str:
+    """Move a single item to a new position within a regular playlist.
+
+    Reordering is keyed off playlistItemID (unique per row, so it handles a
+    playlist that contains the same item more than once). Call
+    playlist_get_contents first to read each row's playlistItemID and current
+    1-based position, then pass the row's playlistItemID and the target
+    new_position here.
+
+    Note: smart playlists cannot be reordered manually; their order is driven
+    by the saved filter/sort.
+
+    Args:
+        playlist_title: Title of the playlist (optional if playlist_id is provided)
+        playlist_id: ID of the playlist (optional if playlist_title is provided)
+        item_playlist_item_id: playlistItemID of the row to move (from playlist_get_contents)
+        new_position: Target 1-based position for the item
+
+    Returns:
+        JSON object with the reordered playlist contents, or an error
+    """
+    try:
+        plex = connect_to_plex()
+
+        playlist, error_response = _resolve_playlist(plex, playlist_title, playlist_id)
+        if error_response is not None:
+            return error_response
+
+        if getattr(playlist, 'smart', False):
+            return json.dumps({"error": "Smart playlists cannot be reordered manually; their order is driven by the saved filter."}, indent=4)
+
+        if item_playlist_item_id is None:
+            return json.dumps({"error": "item_playlist_item_id must be provided (see playlist_get_contents)"}, indent=4)
+        if new_position is None:
+            return json.dumps({"error": "new_position must be provided (1-based)"}, indent=4)
+
+        items = playlist.items()
+        target = next((i for i in items if getattr(i, 'playlistItemID', None) == item_playlist_item_id), None)
+        if target is None:
+            return json.dumps({"error": f"No item with playlistItemID '{item_playlist_item_id}' found in this playlist"}, indent=4)
+
+        if new_position < 1 or new_position > len(items):
+            return json.dumps({"error": f"new_position must be between 1 and {len(items)}"}, indent=4)
+
+        # Build the list without the moved row so the target slot maps to an
+        # "after" anchor. moveItem places target immediately after `after`
+        # (after=None moves it to the top).
+        others = [i for i in items if getattr(i, 'playlistItemID', None) != item_playlist_item_id]
+        idx = new_position - 1
+        after = None if idx <= 0 else others[idx - 1]
+
+        playlist.moveItem(target, after=after)
+        playlist.reload()
+
+        return get_playlist_contents(playlist)
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"Error moving playlist item: {str(e)}"}, indent=4)
 
 
 def _resolve_playlist(plex, playlist_title: str = None, playlist_id: int = None):
