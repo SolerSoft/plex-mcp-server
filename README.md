@@ -92,6 +92,8 @@ plex-mcp-server --transport streamable-http --host 0.0.0.0 --port 8001
 
 Both HTTP transports share the same OAuth configuration and discovery endpoints.
 
+> **Behind a reverse proxy / MCP gateway:** the Streamable HTTP transport has DNS-rebinding (Host header) protection that, by default in the MCP SDK, only trusts `localhost` — so a gateway forwarding an external `Host` gets `421 Misdirected Request`. This server disables that browser-oriented check for proxied deployments. To keep it on with an explicit allowlist, set `MCP_ALLOWED_HOSTS` to a comma-separated list of hosts (e.g. `MCP_ALLOWED_HOSTS=mcp.example.com`); localhost is always included.
+
 ### 5. Claude Connector Installation
 
 Go to https://claude.ai/settings/connectors and add a new connector with the following settings:
