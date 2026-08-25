@@ -3,6 +3,7 @@ import requests
 import aiohttp
 import asyncio
 from plexapi.exceptions import NotFound # type: ignore
+from mcp.types import ToolAnnotations # type: ignore
 from modules import mcp, connect_to_plex
 from urllib.parse import urljoin
 import time
@@ -815,7 +816,7 @@ async def library_get_contents(
         return json.dumps({"error": f"Error getting library contents: {str(e)}"})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def library_get_smart_filter_options(library_name: str, field: str = None, libtype: str = None) -> str:
     """Discover the filter and sort options for building a smart playlist or smart collection in a library.
 
