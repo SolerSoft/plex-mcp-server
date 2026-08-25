@@ -102,7 +102,7 @@ Tools for exploring and managing your Plex libraries.
 | `library_get_details` | Gets detailed information about a library. | `library_name` |
 | `library_get_recently_added` | Lists recently added items in a library. | `library_name`, `limit: int` |
 | `library_get_contents` | Lists all items in a library. | `library_name`, `limit: int` |
-| `library_get_smart_filter_options` | Discover a library's filter fields, operators, sort options (and per-field values) for building smart playlists and smart collections. | `library_name`, `field` |
+| `library_get_smart_filter_options` | Discover a library's filter fields, operators, and sort options per content type (and per-field values) for building smart playlists and smart collections. | `library_name`, `field`, `libtype` |
 
 ### Media Module
 Tools for searching, inspecting, and editing specific media items.
@@ -138,12 +138,16 @@ Manage your personal and shared playlists.
 
 Smart playlists are saved searches over a **single library** that Plex keeps auto-populated, rather than a fixed list of items. The typical flow:
 
-1. Call `library_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. Call it again with a `field` (e.g. `genre`) to list that field's valid values.
+1. Call `library_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. It reports fields grouped by content type (`libtypes`); call it again with a `field` (e.g. `genre`) to list that field's valid values.
 2. Call `playlist_create_smart` with a `filters` dict, e.g. `{"genre": "Comedy", "year>>": 2000, "unwatched": true}`. Append an operator suffix to a field name for comparisons (`year>>` means after that year).
 3. Read the current definition anytime with `playlist_get_contents` — for a smart playlist it returns `smart: true` and a `smartFilter` object (`libtype`, `sort`, `limit`, `filters`).
 4. Adjust later with `playlist_edit_smart_filters` (it overwrites the filter definition, so read it first if you want to build on the existing one).
 
 > **Note on `libtype`:** it defaults to the section's content type, which is `episode` for TV libraries and `track` for music. Set `libtype` to `show` or `artist` if you want whole shows/artists instead.
+
+> **The filter vocabulary is broader than Plex's simple dropdown.** `library_get_smart_filter_options` reports the full `listFields` set the API actually validates against — so fields like `title` or `userRating` are available even though the basic Plex filter menu omits them. Fields are returned with a fully-qualified key per content type; to filter on a non-default type use the `libtype.field` form (e.g. `artist.title`, `track.userRating>>`). Because accepted filters are broader than advertised, **always check the returned `item_count` after creating** to confirm the filter actually matched something sensible.
+
+> **Sort fields are limited by Plex.** Sorting is restricted to what each content type exposes (typically `titleSort`, `userRating`, `addedAt`, `lastViewedAt`, `viewCount`, `random`) — there is no `year` sort, so albums/movies can't be ordered chronologically. If the field you want isn't in `sorts`, sort by `titleSort` or accept the default order.
 
 ### Collection Module
 Organize movies and shows into collections.
