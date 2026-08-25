@@ -2,6 +2,7 @@ from modules import mcp, connect_to_plex
 from typing import List
 from plexapi.playlist import Playlist # type: ignore
 from plexapi.exceptions import NotFound, BadRequest  # type: ignore
+from mcp.types import ToolAnnotations  # type: ignore
 import os
 import requests
 import base64
@@ -723,7 +724,7 @@ async def playlist_delete(playlist_title: str = None, playlist_id: int = None) -
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=4)
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def playlist_get_contents(playlist_title: str = None, playlist_id: int = None,
                                 limit: int = None, offset: int = 0, include_items: bool = True) -> str:
     """Get the contents of a playlist, with pagination.

@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from modules import mcp, connect_to_plex
 import os
 from plexapi.exceptions import NotFound, BadRequest  # type: ignore
+from mcp.types import ToolAnnotations  # type: ignore
 import json
 
 # Default page size when listing collection contents without an explicit limit,
@@ -1102,7 +1103,7 @@ def get_collection_contents(collection, offset=0, limit=None, include_items=True
         return json.dumps({"error": f"Error formatting collection contents: {str(e)}"}, indent=4)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def collection_get_contents(collection_title: str = None, collection_id: int = None,
                                   library_name: str = None, limit: int = None, offset: int = 0,
                                   include_items: bool = True) -> str:
