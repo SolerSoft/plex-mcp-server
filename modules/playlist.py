@@ -150,7 +150,7 @@ async def playlist_edit(playlist_title: str = None, playlist_id: int = None, new
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
                 original_title = playlist.title
             except Exception as e:
@@ -245,7 +245,7 @@ async def playlist_upload_poster(playlist_title: str = None, playlist_id: int = 
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
@@ -342,7 +342,7 @@ async def playlist_copy_to_user(playlist_title: str = None, playlist_id: int = N
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"status": "error", "message": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"status": "error", "message": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
@@ -425,7 +425,7 @@ async def playlist_add_to(playlist_title: str = None, playlist_id: int = None, i
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
@@ -575,7 +575,7 @@ async def playlist_remove_from(playlist_title: str = None, playlist_id: int = No
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
@@ -680,7 +680,7 @@ async def playlist_delete(playlist_title: str = None, playlist_id: int = None) -
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
                 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
@@ -763,7 +763,7 @@ async def playlist_get_contents(playlist_title: str = None, playlist_id: int = N
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
 
-                if not playlist:
+                if playlist is None:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
 
                 # Get playlist contents
@@ -978,7 +978,7 @@ def _resolve_playlist(plex, playlist_title: str = None, playlist_id: int = None)
             except Exception:
                 # Fall back to matching by ratingKey across all playlists
                 playlist = next((p for p in plex.playlists() if p.ratingKey == playlist_id), None)
-            if not playlist:
+            if playlist is None:
                 return None, json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
             return playlist, None
         except Exception as e:
