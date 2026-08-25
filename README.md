@@ -5,7 +5,7 @@ A powerful Model-Context-Protocol (MCP) server for interacting with Plex Media S
 ## Features
 
 - **Standardized API**: Unified JSON responses for all Plex operations.
-- **Multiple Transports**: Supports both `stdio` and `SSE` (Server-Sent Events).
+- **Multiple Transports**: Supports `stdio`, `SSE` (Server-Sent Events), and stateless `streamable-http`.
 - **Comprehensive Control**: Manage libraries, media, collections, playlists, clients, and users.
 - **Remote Ready**: Built-in OAuth 2.1 support for integration with remote AI platforms like Claude.ai.
 - **Admin Tools**: Access logs, monitor bandwidth, and run Butler tasks.
@@ -78,11 +78,25 @@ Example for Claude Desktop (`%APPDATA%/Claude/claude_desktop_config.json`):
   }
 }
 ```
-### 4. Claude Connector Installation
+### 4. Transports (HTTP)
+
+For remote/HTTP use, pick a transport with `--transport`:
+
+- `--transport sse` — Server-Sent Events at `/sse` (+ `/messages/`). Stateful: the session is bound to a live SSE stream, which can wedge behind proxies/MCP gateways if that stream drops (e.g. after a server restart).
+- `--transport streamable-http` — single `/mcp` endpoint, **stateless**. Each request is self-contained, so a server restart never leaves a gateway pinned to a dead session. Recommended when the server sits behind an MCP gateway.
+
+```bash
+plex-mcp-server --transport streamable-http --host 0.0.0.0 --port 8001
+# MCP endpoint: http://<host>:8001/mcp
+```
+
+Both HTTP transports share the same OAuth configuration and discovery endpoints.
+
+### 5. Claude Connector Installation
 
 Go to https://claude.ai/settings/connectors and add a new connector with the following settings:
 - Name: Plex MCP
-- URL: https://plexmcp.example.com/sse
+- URL: https://plexmcp.example.com/sse (SSE) or https://plexmcp.example.com/mcp (streamable-http)
 - Add OAuth Client ID and Client Secret if OAuth is enabled
 
 <img width="516" height="515" alt="image" src="https://github.com/user-attachments/assets/7949a127-51a7-4c60-a121-511ee4a1f00d" />

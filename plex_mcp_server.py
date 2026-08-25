@@ -215,6 +215,92 @@ async def handle_authorization_server_metadata(request: Request):
         return JSONResponse({"error": f"Failed to connect to Authentik: {str(e)}"}, status_code=502)
 
 
+def _build_oauth_routes():
+    """OAuth discovery and proxy routes, shared by the SSE and Streamable HTTP apps."""
+    async def handle_authorize_redirect(request: Request):
+        """Redirect /authorize to Authentik's authorization endpoint."""
+        import aiohttp
+        # Get Authentik's authorize endpoint
+        discovery_url = f"{oauth_config.issuer.rstrip('/')}/.well-known/openid-configuration"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(discovery_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        metadata = await resp.json()
+                        auth_endpoint = metadata.get("authorization_endpoint")
+                        # Forward all query params to Authentik
+                        query_string = request.url.query
+                        redirect_url = f"{auth_endpoint}?{query_string}" if query_string else auth_endpoint
+                        return RedirectResponse(url=redirect_url, status_code=302)
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to redirect to Authentik: {str(e)}"}, status_code=502)
+        return JSONResponse({"error": "Could not determine authorization endpoint"}, status_code=502)
+
+    async def handle_token_proxy(request: Request):
+        """Proxy /token requests to Authentik's token endpoint."""
+        import aiohttp
+
+        # Get Authentik's token endpoint
+        discovery_url = f"{oauth_config.issuer.rstrip('/')}/.well-known/openid-configuration"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(discovery_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        metadata = await resp.json()
+                        token_endpoint = metadata.get("token_endpoint")
+                        # Forward the token request to Authentik
+                        body = await request.body()
+                        headers = {k: v for k, v in request.headers.items()
+                                  if k.lower() in ['content-type', 'authorization']}
+                        async with session.post(token_endpoint, data=body, headers=headers) as token_resp:
+                            content = await token_resp.text()
+                            print(f"[Token] Response status: {token_resp.status}")
+                            print(f"[Token] Response content (full): {content}")
+                            response_headers = {
+                                "Content-Type": token_resp.headers.get("Content-Type", "application/json"),
+                            }
+                            return Response(
+                                content=content,
+                                status_code=token_resp.status,
+                                headers=response_headers
+                            )
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to proxy token request: {str(e)}"}, status_code=502)
+        return JSONResponse({"error": "Could not determine token endpoint"}, status_code=502)
+
+    return [
+        Route("/.well-known/oauth-protected-resource",
+              endpoint=handle_protected_resource_metadata),
+        Route("/.well-known/oauth-authorization-server",
+              endpoint=handle_authorization_server_metadata),
+        Route("/authorize", endpoint=handle_authorize_redirect),
+        Route("/token", endpoint=handle_token_proxy, methods=["POST", "OPTIONS"]),
+    ]
+
+
+def create_streamable_http_app(debug: bool = False):
+    """Create a Starlette app serving the MCP server over stateless Streamable HTTP at /mcp.
+
+    Streamable HTTP (single /mcp endpoint) is gateway-friendly: with stateless mode each request
+    is self-contained, so a server restart never wedges a proxy/gateway's session the way the
+    stateful SSE transport does. Reuses the same OAuth middleware and discovery routes as SSE.
+    """
+    # Stateless so a backend restart never leaves a gateway pinned to a dead session.
+    mcp.settings.stateless_http = True
+    mcp.settings.streamable_http_path = "/mcp"
+
+    # FastMCP builds the /mcp route together with the session-manager lifespan; keep that app
+    # so its lifespan runs, and layer our OAuth routes/middleware on top.
+    app = mcp.streamable_http_app()
+    app.debug = debug
+
+    if oauth_config.enabled:
+        app.router.routes.extend(_build_oauth_routes())
+        app.add_middleware(OAuthMiddleware)
+
+    return app
+
+
 def create_starlette_app(mcp_server: Server, debug: bool = False):
     """Create a Starlette application that can serve the provided mcp server with SSE."""
     sse = SseServerTransport("/messages/")
@@ -240,66 +326,8 @@ def create_starlette_app(mcp_server: Server, debug: bool = False):
     
     # Add OAuth discovery endpoints if enabled
     if oauth_config.enabled:
-        async def handle_authorize_redirect(request: Request):
-            """Redirect /authorize to Authentik's authorization endpoint."""
-            import aiohttp
-            # Get Authentik's authorize endpoint
-            discovery_url = f"{oauth_config.issuer.rstrip('/')}/.well-known/openid-configuration"
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(discovery_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            metadata = await resp.json()
-                            auth_endpoint = metadata.get("authorization_endpoint")
-                            # Forward all query params to Authentik
-                            query_string = request.url.query
-                            redirect_url = f"{auth_endpoint}?{query_string}" if query_string else auth_endpoint
-                            return RedirectResponse(url=redirect_url, status_code=302)
-            except Exception as e:
-                return JSONResponse({"error": f"Failed to redirect to Authentik: {str(e)}"}, status_code=502)
-            return JSONResponse({"error": "Could not determine authorization endpoint"}, status_code=502)
-        
-        async def handle_token_proxy(request: Request):
-            """Proxy /token requests to Authentik's token endpoint."""
-            import aiohttp
-            
-            # Get Authentik's token endpoint
-            discovery_url = f"{oauth_config.issuer.rstrip('/')}/.well-known/openid-configuration"
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(discovery_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            metadata = await resp.json()
-                            token_endpoint = metadata.get("token_endpoint")
-                            # Forward the token request to Authentik
-                            body = await request.body()
-                            headers = {k: v for k, v in request.headers.items() 
-                                      if k.lower() in ['content-type', 'authorization']}
-                            async with session.post(token_endpoint, data=body, headers=headers) as token_resp:
-                                content = await token_resp.text()
-                                print(f"[Token] Response status: {token_resp.status}")
-                                print(f"[Token] Response content (full): {content}")
-                                response_headers = {
-                                    "Content-Type": token_resp.headers.get("Content-Type", "application/json"),
-                                }
-                                return Response(
-                                    content=content,
-                                    status_code=token_resp.status,
-                                    headers=response_headers
-                                )
-            except Exception as e:
-                return JSONResponse({"error": f"Failed to proxy token request: {str(e)}"}, status_code=502)
-            return JSONResponse({"error": "Could not determine token endpoint"}, status_code=502)
-        
-        routes.extend([
-            Route("/.well-known/oauth-protected-resource", 
-                  endpoint=handle_protected_resource_metadata),
-            Route("/.well-known/oauth-authorization-server", 
-                  endpoint=handle_authorization_server_metadata),
-            Route("/authorize", endpoint=handle_authorize_redirect),
-            Route("/token", endpoint=handle_token_proxy, methods=["POST", "OPTIONS"]),
-        ])
-    
+        routes.extend(_build_oauth_routes())
+
     # Build middleware stack
     middleware = []
 
@@ -319,10 +347,10 @@ def main():
     
     # Setup command line arguments
     parser = argparse.ArgumentParser(description='Run Plex MCP Server')
-    parser.add_argument('--transport', choices=['stdio', 'sse'], default='sse',
-                        help='Transport method to use (stdio or sse)')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to (for SSE)')
-    parser.add_argument('--port', type=int, default=3001, help='Port to listen on (for SSE)')
+    parser.add_argument('--transport', choices=['stdio', 'sse', 'streamable-http'], default='sse',
+                        help='Transport method to use (stdio, sse, or streamable-http)')
+    parser.add_argument('--host', default='0.0.0.0', help='Host to bind to (for SSE/Streamable HTTP)')
+    parser.add_argument('--port', type=int, default=3001, help='Port to listen on (for SSE/Streamable HTTP)')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     
     # Plex configuration arguments
@@ -376,6 +404,12 @@ def main():
     if args.transport == 'stdio':
         # Run with stdio transport (original method)
         mcp.run(transport='stdio')
+    elif args.transport == 'streamable-http':
+        # Run with stateless Streamable HTTP transport (gateway-friendly)
+        streamable_app = create_streamable_http_app(debug=args.debug)
+        print(f"Starting Streamable HTTP server on http://{args.host}:{args.port}")
+        print("Access the MCP endpoint at /mcp (stateless)")
+        uvicorn.run(streamable_app, host=args.host, port=args.port)
     else:
         # Run with SSE transport
         mcp_server = mcp._mcp_server  # Access the underlying MCP server
