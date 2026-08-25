@@ -813,3 +813,78 @@ async def library_get_contents(
             
     except Exception as e:
         return json.dumps({"error": f"Error getting library contents: {str(e)}"})
+
+
+@mcp.tool()
+async def library_get_smart_filter_options(library_name: str, field: str = None) -> str:
+    """Discover the filter and sort options for building a smart playlist or smart collection in a library.
+
+    Smart playlists and smart collections are both saved searches over a single library that Plex
+    keeps auto-populated. They share the same per-library filter vocabulary, so use this tool to
+    learn what you can filter and sort on before calling playlist_create_smart / collection_create_smart
+    (or their edit_smart_filters counterparts).
+
+    Args:
+        library_name: Name of the library section to inspect (e.g. 'Movies', 'TV Shows', 'Music')
+        field: Optional filter field (e.g. 'genre', 'contentRating'). When provided, returns the
+            valid values (choices) for that field instead of the overall schema. Useful for tag
+            fields where you need the exact value to filter on.
+    """
+    try:
+        plex = connect_to_plex()
+        try:
+            section = plex.library.section(library_name)
+        except NotFound:
+            return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+
+        # Field-choices mode: list the valid values for a single field
+        if field:
+            try:
+                choices = section.listFilterChoices(field)
+            except Exception as e:
+                return json.dumps({"error": f"Could not get choices for field '{field}': {str(e)}"}, indent=4)
+            values = [{"title": c.title, "value": c.key} for c in choices]
+            return json.dumps({
+                "library": section.title,
+                "field": field,
+                "count": len(values),
+                "choices": values
+            }, indent=4)
+
+        # Schema mode: list available filter fields (with operators) and sort fields
+        filters = []
+        for f in section.listFilters():
+            try:
+                operators = [o.key for o in section.listOperators(f.filterType)]
+            except Exception:
+                operators = []
+            filters.append({
+                "field": f.filter,
+                "title": f.title,
+                "type": f.filterType,
+                "operators": operators
+            })
+
+        sorts = []
+        for s in section.listSorts():
+            sorts.append({
+                "field": s.key,
+                "title": s.title,
+                "defaultDirection": s.defaultDirection
+            })
+
+        return json.dumps({
+            "library": section.title,
+            "default_libtype": section.METADATA_TYPE,
+            "filters": filters,
+            "sorts": sorts,
+            "usage": (
+                "Pass filters to playlist_create_smart / collection_create_smart as a dict, e.g. "
+                '{"genre": "Comedy", "year>>": 2000, "unwatched": true}. '
+                "Append an operator suffix from a field's 'operators' list to the field name "
+                "for comparisons (e.g. 'year>>' means after that year). Call this tool again "
+                "with a 'field' argument to list the valid values for a tag field."
+            )
+        }, indent=4)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, indent=4)
