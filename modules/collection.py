@@ -257,12 +257,12 @@ async def collection_add_to(collection_title: str = None, collection_id: int = N
                                         collection = c
                                         library = section
                                         break
-                                if collection:
+                                if collection is not None:
                                     break
                             except:
                                 continue
                 
-                if not collection:
+                if collection is None:
                     return json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching collection by ID: {str(e)}"}, indent=4)
@@ -443,12 +443,12 @@ async def collection_remove_from(collection_title: str = None, collection_id: in
                                     if c.ratingKey == collection_id:
                                         collection = c
                                         break
-                                if collection:
+                                if collection is not None:
                                     break
                             except:
                                 continue
                 
-                if not collection:
+                if collection is None:
                     return json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching collection by ID: {str(e)}"}, indent=4)
@@ -564,12 +564,12 @@ async def collection_delete(collection_title: str = None, collection_id: int = N
                                     if c.ratingKey == collection_id:
                                         collection = c
                                         break
-                                if collection:
+                                if collection is not None:
                                     break
                             except:
                                 continue
                 
-                if not collection:
+                if collection is None:
                     return json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
                 
                 # Get the collection title to return in the message
@@ -684,12 +684,12 @@ async def collection_edit(collection_title: str = None, collection_id: int = Non
                                     if c.ratingKey == collection_id:
                                         collection = c
                                         break
-                                if collection:
+                                if collection is not None:
                                     break
                             except:
                                 continue
                 
-                if not collection:
+                if collection is None:
                     return json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
             except Exception as e:
                 return json.dumps({"error": f"Error fetching collection by ID: {str(e)}"}, indent=4)
@@ -846,9 +846,9 @@ def _resolve_collection(plex, collection_title=None, collection_id=None, library
                             collection = next((c for c in section.collections() if c.ratingKey == collection_id), None)
                         except Exception:
                             continue
-                        if collection:
+                        if collection is not None:
                             break
-            if not collection:
+            if collection is None:
                 return None, json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
             return collection, None
         except Exception as e:
