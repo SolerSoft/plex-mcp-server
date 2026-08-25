@@ -7,6 +7,10 @@ import requests
 import base64
 import json
 
+# Default page size when listing playlist/collection contents without an explicit limit,
+# so large (potentially hundreds of thousands of items) playlists don't overflow a response.
+DEFAULT_CONTENTS_PAGE = 200
+
 # Functions for playlists and collections
 @mcp.tool()
 async def playlist_list(library_name: str = None, content_type: str = None) -> str:
@@ -720,23 +724,33 @@ async def playlist_delete(playlist_title: str = None, playlist_id: int = None) -
         return json.dumps({"error": str(e)}, indent=4)
 
 @mcp.tool()
-async def playlist_get_contents(playlist_title: str = None, playlist_id: int = None) -> str:
-    """Get the contents of a playlist.
-    
+async def playlist_get_contents(playlist_title: str = None, playlist_id: int = None,
+                                limit: int = None, offset: int = 0, include_items: bool = True) -> str:
+    """Get the contents of a playlist, with pagination.
+
+    Results are paginated so large playlists don't overflow the response. The response includes
+    `totalItems`, `offset`, `limit`, `returnedCount`, and `hasMore`; page through by increasing
+    `offset`. For a smart playlist the response also includes a `smartFilter` object (the saved
+    search that populates it).
+
     Args:
         playlist_title: Title of the playlist to get contents of (optional if playlist_id is provided)
         playlist_id: ID of the playlist to get contents of (optional if playlist_title is provided)
-        
+        limit: Maximum number of items to return in this page (defaults to 200)
+        offset: Number of items to skip before this page (for paging; default 0)
+        include_items: When False, skip the item list entirely and return only metadata and, for a
+            smart playlist, its `smartFilter`. Use this to read a huge smart playlist's filter cheaply.
+
     Returns:
-        JSON object containing the playlist contents
+        JSON object containing the playlist metadata and (unless include_items is False) one page of items
     """
     try:
         plex = connect_to_plex()
-        
+
         # Validate that at least one identifier is provided
         if not playlist_id and not playlist_title:
             return json.dumps({"error": "Either playlist_id or playlist_title must be provided"}, indent=4)
-        
+
         # If playlist_id is provided, use it to directly fetch the playlist
         if playlist_id:
             try:
@@ -744,32 +758,30 @@ async def playlist_get_contents(playlist_title: str = None, playlist_id: int = N
                 # Try fetching by ratingKey first
                 try:
                     playlist = plex.fetchItem(playlist_id)
-                    print(playlist.items())
                 except:
                     # If that fails, try finding by key in all playlists
                     all_playlists = plex.playlists()
                     playlist = next((p for p in all_playlists if p.ratingKey == playlist_id), None)
-                
+
                 if not playlist:
                     return json.dumps({"error": f"Playlist with ID '{playlist_id}' not found"}, indent=4)
-                
+
                 # Get playlist contents
-                print(playlist)
-                return get_playlist_contents(playlist)
+                return get_playlist_contents(playlist, offset=offset, limit=limit, include_items=include_items)
             except Exception as e:
                 if "500" in str(e):
                     return json.dumps({"error": "Empty playlist"}, indent=4)
                 else:
                     return json.dumps({"error": f"Error fetching playlist by ID: {str(e)}"}, indent=4)
-        
+
         # If we get here, we're searching by title
         all_playlists = plex.playlists()
         matching_playlists = [p for p in all_playlists if p.title.lower() == playlist_title.lower()]
-        
+
         # If no matching playlists
         if not matching_playlists:
             return json.dumps({"error": f"No playlist found with title '{playlist_title}'"}, indent=4)
-        
+
         # If multiple matching playlists, return list of matches with IDs
         if len(matching_playlists) > 1:
             matches = []
@@ -780,50 +792,30 @@ async def playlist_get_contents(playlist_title: str = None, playlist_id: int = N
                     "type": p.playlistType,
                     "item_count": p.leafCount if hasattr(p, 'leafCount') else len(p.items())
                 })
-            
+
             # Return as a direct array like playlist_list
             return json.dumps(matches, indent=4)
-        
+
         # Single match - get contents
-        return get_playlist_contents(matching_playlists[0])
-    
+        return get_playlist_contents(matching_playlists[0], offset=offset, limit=limit, include_items=include_items)
+
     except Exception as e:
         return json.dumps({"status": "error", "message": f"Error getting playlist contents: {str(e)}"}, indent=4)
 
-def get_playlist_contents(playlist):
-    """Helper function to get formatted playlist contents."""
-    print(playlist)
-    try:
-        items = playlist.items()
-        playlist_items = []
+def get_playlist_contents(playlist, offset=0, limit=None, include_items=True):
+    """Helper function to get formatted, paginated playlist contents.
 
-        for position, item in enumerate(items, start=1):
-            item_data = {
-                "title": item.title,
-                "type": item.type,
-                "position": position,
-                "playlistItemID": item.playlistItemID if hasattr(item, 'playlistItemID') else None,
-                "ratingKey": item.ratingKey,
-                "addedAt": item.addedAt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'addedAt') else None,
-                "duration": item.duration if hasattr(item, 'duration') else None,
-                "thumb": item.thumb if hasattr(item, 'thumb') else None
-            }
-            
-            # Add media-type specific fields
-            if item.type == 'movie':
-                item_data["year"] = item.year if hasattr(item, 'year') else None
-            elif item.type == 'episode':
-                item_data["show"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
-                item_data["season"] = item.parentTitle if hasattr(item, 'parentTitle') else None
-                item_data["seasonNumber"] = item.parentIndex if hasattr(item, 'parentIndex') else None
-                item_data["episodeNumber"] = item.index if hasattr(item, 'index') else None
-            elif item.type == 'track':
-                item_data["artist"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
-                item_data["album"] = item.parentTitle if hasattr(item, 'parentTitle') else None
-                item_data["albumArtist"] = item.originalTitle if hasattr(item, 'originalTitle') else None
-            
-            playlist_items.append(item_data)
-        
+    Pagination is done server-side (Plex container params), so only the requested page is fetched.
+    When include_items is False, no items are fetched at all - only metadata and the smart filter.
+    """
+    try:
+        # Refresh so totalItems (leafCount) is current
+        try:
+            playlist.reload()
+        except Exception:
+            pass
+        total = getattr(playlist, 'leafCount', None)
+
         # Whether this is a smart playlist, and its filter definition if so
         is_smart = bool(getattr(playlist, 'smart', False))
         smart_filter = None
@@ -842,13 +834,64 @@ def get_playlist_contents(playlist):
             "smart": is_smart,
             "summary": playlist.summary if hasattr(playlist, 'summary') else None,
             "duration": playlist.duration if hasattr(playlist, 'duration') else None,
-            "itemCount": len(playlist_items),
-            "items": playlist_items
+            "totalItems": total
         }
-
         # Include the smart filter definition so it can be read back before editing
         if smart_filter is not None:
             playlist_info["smartFilter"] = smart_filter
+
+        # Filter-only mode: skip fetching items entirely
+        if not include_items:
+            playlist_info["itemsIncluded"] = False
+            return json.dumps(playlist_info, indent=4)
+
+        # Fetch just the requested page of items (server-side pagination)
+        page_size = limit if limit is not None else DEFAULT_CONTENTS_PAGE
+        offset = max(0, offset or 0)
+        items = playlist.fetchItems(f'{playlist.key}/items', container_start=offset, container_size=page_size)
+
+        playlist_items = []
+        for i, item in enumerate(items):
+            position = offset + i + 1
+            item_data = {
+                "title": item.title,
+                "type": item.type,
+                "position": position,
+                "playlistItemID": item.playlistItemID if hasattr(item, 'playlistItemID') else None,
+                "ratingKey": item.ratingKey,
+                "addedAt": item.addedAt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'addedAt') and item.addedAt else None,
+                "duration": item.duration if hasattr(item, 'duration') else None,
+                "thumb": item.thumb if hasattr(item, 'thumb') else None
+            }
+
+            # Add media-type specific fields
+            if item.type == 'movie':
+                item_data["year"] = item.year if hasattr(item, 'year') else None
+            elif item.type == 'episode':
+                item_data["show"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
+                item_data["season"] = item.parentTitle if hasattr(item, 'parentTitle') else None
+                item_data["seasonNumber"] = item.parentIndex if hasattr(item, 'parentIndex') else None
+                item_data["episodeNumber"] = item.index if hasattr(item, 'index') else None
+            elif item.type == 'track':
+                item_data["artist"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
+                item_data["album"] = item.parentTitle if hasattr(item, 'parentTitle') else None
+                item_data["albumArtist"] = item.originalTitle if hasattr(item, 'originalTitle') else None
+
+            playlist_items.append(item_data)
+
+        returned = len(playlist_items)
+        if total is not None:
+            has_more = offset + returned < total
+        else:
+            has_more = returned == page_size
+
+        playlist_info.update({
+            "offset": offset,
+            "limit": page_size,
+            "returnedCount": returned,
+            "hasMore": has_more,
+            "items": playlist_items
+        })
         
         # Return just the playlist info without status wrappers
         return json.dumps(playlist_info, indent=4)

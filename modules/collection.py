@@ -5,6 +5,10 @@ import os
 from plexapi.exceptions import NotFound, BadRequest  # type: ignore
 import json
 
+# Default page size when listing collection contents without an explicit limit,
+# so large collections don't overflow a response.
+DEFAULT_CONTENTS_PAGE = 200
+
 @mcp.tool()
 async def collection_list(library_name: str = None) -> str:
     """List all collections on the Plex server or in a specific library.
@@ -995,3 +999,136 @@ async def collection_edit_smart_filters(collection_title: str = None, collection
         }, indent=4)
     except Exception as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=4)
+
+
+def get_collection_contents(collection, offset=0, limit=None, include_items=True):
+    """Helper: build a collection's paginated items plus (for smart collections) its filter definition.
+
+    Pagination is done server-side (Plex container params), so only the requested page is fetched.
+    When include_items is False, no items are fetched - only metadata and the smart filter.
+    Mirrors get_playlist_contents so the two readbacks stay consistent.
+    """
+    try:
+        # Refresh so totalItems (childCount) is current
+        try:
+            collection.reload()
+        except Exception:
+            pass
+        total = getattr(collection, 'childCount', None)
+
+        # For smart collections, include the current filter definition
+        is_smart = bool(getattr(collection, 'smart', False))
+        smart_filter = None
+        if is_smart:
+            try:
+                smart_filter = collection.filters()
+            except Exception:
+                # A smart collection whose filter can't be parsed still returns contents
+                smart_filter = None
+
+        collection_info = {
+            "title": collection.title,
+            "id": collection.ratingKey,
+            "key": collection.key,
+            "type": collection.subtype if hasattr(collection, 'subtype') else None,
+            "smart": is_smart,
+            "summary": collection.summary if hasattr(collection, 'summary') else None,
+            "totalItems": total
+        }
+        # Include the smart filter definition so it can be read back before editing
+        if smart_filter is not None:
+            collection_info["smartFilter"] = smart_filter
+
+        # Filter-only mode: skip fetching items entirely
+        if not include_items:
+            collection_info["itemsIncluded"] = False
+            return json.dumps(collection_info, indent=4)
+
+        # Fetch just the requested page of items (server-side pagination)
+        page_size = limit if limit is not None else DEFAULT_CONTENTS_PAGE
+        offset = max(0, offset or 0)
+        items = collection.fetchItems(f'{collection.key}/children', container_start=offset, container_size=page_size)
+
+        collection_items = []
+        for i, item in enumerate(items):
+            position = offset + i + 1
+            item_data = {
+                "title": item.title,
+                "type": item.type,
+                "position": position,
+                "ratingKey": item.ratingKey,
+                "addedAt": item.addedAt.strftime("%Y-%m-%d %H:%M:%S") if hasattr(item, 'addedAt') and item.addedAt else None,
+                "thumb": item.thumb if hasattr(item, 'thumb') else None
+            }
+
+            # Add media-type specific fields
+            if item.type == 'movie':
+                item_data["year"] = item.year if hasattr(item, 'year') else None
+            elif item.type == 'show':
+                item_data["year"] = item.year if hasattr(item, 'year') else None
+            elif item.type == 'episode':
+                item_data["show"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
+                item_data["season"] = item.parentTitle if hasattr(item, 'parentTitle') else None
+                item_data["seasonNumber"] = item.parentIndex if hasattr(item, 'parentIndex') else None
+                item_data["episodeNumber"] = item.index if hasattr(item, 'index') else None
+            elif item.type == 'artist':
+                pass
+            elif item.type == 'album':
+                item_data["artist"] = item.parentTitle if hasattr(item, 'parentTitle') else None
+                item_data["year"] = item.year if hasattr(item, 'year') else None
+            elif item.type == 'track':
+                item_data["artist"] = item.grandparentTitle if hasattr(item, 'grandparentTitle') else None
+                item_data["album"] = item.parentTitle if hasattr(item, 'parentTitle') else None
+                item_data["albumArtist"] = item.originalTitle if hasattr(item, 'originalTitle') else None
+
+            collection_items.append(item_data)
+
+        returned = len(collection_items)
+        if total is not None:
+            has_more = offset + returned < total
+        else:
+            has_more = returned == page_size
+
+        collection_info.update({
+            "offset": offset,
+            "limit": page_size,
+            "returnedCount": returned,
+            "hasMore": has_more,
+            "items": collection_items
+        })
+
+        return json.dumps(collection_info, indent=4)
+    except Exception as e:
+        return json.dumps({"error": f"Error formatting collection contents: {str(e)}"}, indent=4)
+
+
+@mcp.tool()
+async def collection_get_contents(collection_title: str = None, collection_id: int = None,
+                                  library_name: str = None, limit: int = None, offset: int = 0,
+                                  include_items: bool = True) -> str:
+    """Get the contents of a collection, with pagination, including the filter for a smart collection.
+
+    This is the collection analog of playlist_get_contents: it returns one page of the collection's
+    items and, when the collection is smart, a smartFilter object (libtype, sort, limit, filters)
+    describing the saved search that populates it. The response includes `totalItems`, `offset`,
+    `limit`, `returnedCount`, and `hasMore`; page through by increasing `offset`.
+
+    Args:
+        collection_title: Title of the collection (optional if collection_id is provided)
+        collection_id: ID of the collection (optional if collection_title is provided)
+        library_name: Name of the library containing the collection (required if using collection_title)
+        limit: Maximum number of items to return in this page (defaults to 200)
+        offset: Number of items to skip before this page (for paging; default 0)
+        include_items: When False, skip the item list entirely and return only metadata and, for a
+            smart collection, its `smartFilter`. Use this to read a large collection's filter cheaply.
+    """
+    try:
+        plex = connect_to_plex()
+
+        collection, error_response = _resolve_collection(plex, collection_title, collection_id, library_name)
+        if error_response is not None:
+            return error_response
+
+        return get_collection_contents(collection, offset=offset, limit=limit, include_items=include_items)
+    except Exception as e:
+        return json.dumps({"status": "error", "message": f"Error getting collection contents: {str(e)}"}, indent=4)
