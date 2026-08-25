@@ -924,6 +924,13 @@ async def collection_create_smart(collection_title: str, library_name: str, filt
             except Exception:
                 pass
 
+        # Reload so item_count reflects what the filter actually matched, not a
+        # stale value from creation - verify this count looks right for the filter.
+        try:
+            collection.reload()
+        except Exception:
+            pass
+
         return json.dumps({
             "status": "success",
             "message": f"Smart collection '{collection_title}' created successfully",

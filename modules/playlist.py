@@ -1005,6 +1005,13 @@ async def playlist_create_smart(playlist_title: str, library_name: str, filters:
             except Exception:
                 pass
 
+        # Reload so item_count reflects what the filter actually matched, not a
+        # stale value from creation - verify this count looks right for the filter.
+        try:
+            playlist.reload()
+        except Exception:
+            pass
+
         return json.dumps({
             "status": "success",
             "message": f"Smart playlist '{playlist_title}' created successfully",
