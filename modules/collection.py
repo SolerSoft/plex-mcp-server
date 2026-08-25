@@ -60,6 +60,12 @@ async def collection_list(library_name: str = None) -> str:
                     "ID": collection.ratingKey,
                     "items": collection.childCount
                 }
+                # For smart collections, include the current filter definition
+                if collection.smart:
+                    try:
+                        collection_info["smartFilter"] = collection.filters()
+                    except Exception:
+                        pass
                 lib_collections.append(collection_info)
             
             libraries_collections[library.title] = {
@@ -80,6 +86,12 @@ async def collection_list(library_name: str = None) -> str:
                     "ID": collection.ratingKey,
                     "items": collection.childCount
                 }
+                # For smart collections, include the current filter definition
+                if collection.smart:
+                    try:
+                        collection_info["smartFilter"] = collection.filters()
+                    except Exception:
+                        pass
                 lib_collections.append(collection_info)
             
             libraries_collections[library.title] = {
@@ -804,3 +816,175 @@ async def collection_edit(collection_title: str = None, collection_id: int = Non
         }, indent=4)
     except Exception as e:
         return json.dumps({"error": str(e)}, indent=4)
+
+
+def _resolve_collection(plex, collection_title=None, collection_id=None, library_name=None):
+    """Resolve a collection by id, or by title within a library.
+
+    Returns a tuple (collection, error_response). On success, collection is the
+    matched Collection and error_response is None. On failure or ambiguity,
+    collection is None and error_response is a JSON string ready to return.
+    """
+    if not collection_id and not collection_title:
+        return None, json.dumps({"error": "Either collection_id or collection_title must be provided"}, indent=4)
+
+    # Fetch directly by id when provided
+    if collection_id:
+        try:
+            try:
+                collection = plex.fetchItem(collection_id)
+            except Exception:
+                # Fall back to scanning movie/show library collections by ratingKey
+                collection = None
+                for section in plex.library.sections():
+                    if section.type in ['movie', 'show']:
+                        try:
+                            collection = next((c for c in section.collections() if c.ratingKey == collection_id), None)
+                        except Exception:
+                            continue
+                        if collection:
+                            break
+            if not collection:
+                return None, json.dumps({"error": f"Collection with ID '{collection_id}' not found"}, indent=4)
+            return collection, None
+        except Exception as e:
+            return None, json.dumps({"error": f"Error fetching collection by ID: {str(e)}"}, indent=4)
+
+    # Otherwise match by title within a specific library
+    if not library_name:
+        return None, json.dumps({"error": "Library name is required when resolving by collection title"}, indent=4)
+    try:
+        library = plex.library.section(library_name)
+    except NotFound:
+        return None, json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+
+    matching = [c for c in library.collections() if c.title.lower() == collection_title.lower()]
+    if not matching:
+        return None, json.dumps({"error": f"Collection '{collection_title}' not found in library '{library_name}'"}, indent=4)
+    if len(matching) > 1:
+        # Ambiguous title: return the candidates so the caller can pick an id
+        matches = [{"title": c.title, "id": c.ratingKey, "library": library_name} for c in matching]
+        return None, json.dumps(matches, indent=4)
+    return matching[0], None
+
+
+@mcp.tool()
+async def collection_create_smart(collection_title: str, library_name: str, filters: dict = None,
+                                  sort: str = None, limit: int = None, libtype: str = None,
+                                  summary: str = None) -> str:
+    """Create a smart collection that Plex keeps auto-populated from a library search.
+
+    Unlike collection_create (a fixed list of items), a smart collection is a saved filter
+    scoped to a single library section. Use library_get_smart_filter_options first to
+    discover the available filter fields, operators, sort fields, and valid values.
+
+    Args:
+        collection_title: Title for the new smart collection
+        library_name: Library section the collection is built from (smart collections are single-section)
+        filters: Advanced filters as a dict, e.g. {"genre": "Comedy", "year>>": 2000, "unwatched": true}.
+            Append an operator suffix (see library_get_smart_filter_options) to a field for comparisons.
+        sort: Sort field(s), e.g. "addedAt:desc" or "year:asc". Comma-separate multiple fields.
+        limit: Maximum number of items in the collection
+        libtype: Content type to filter (movie, show, season, episode, artist, album, track, photo).
+            Defaults to the section's type - note this is 'episode' for TV libraries and 'track' for
+            music, so set libtype='show'/'artist' if you want whole shows/artists.
+        summary: Optional description for the collection
+    """
+    try:
+        plex = connect_to_plex()
+        try:
+            library = plex.library.section(library_name)
+        except NotFound:
+            return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+
+        # Refuse to duplicate an existing collection title in this library
+        try:
+            existing = next((c for c in library.collections() if c.title.lower() == collection_title.lower()), None)
+            if existing:
+                return json.dumps({"status": "error", "message": f"Collection '{collection_title}' already exists in library '{library_name}'"}, indent=4)
+        except Exception:
+            pass  # If we can't check existing collections, proceed anyway
+
+        try:
+            collection = library.createCollection(
+                title=collection_title,
+                smart=True,
+                filters=filters,
+                sort=sort,
+                limit=limit,
+                libtype=libtype
+            )
+        except BadRequest as e:
+            return json.dumps({"status": "error", "message": f"Invalid smart collection definition: {str(e)}"}, indent=4)
+
+        # Apply an optional summary after creation
+        if summary:
+            try:
+                collection.editSummary(summary)
+            except Exception:
+                pass
+
+        return json.dumps({
+            "status": "success",
+            "message": f"Smart collection '{collection_title}' created successfully",
+            "data": {
+                "title": collection.title,
+                "id": collection.ratingKey,
+                "smart": True,
+                "library": library.title,
+                "item_count": collection.childCount if hasattr(collection, 'childCount') else None
+            }
+        }, indent=4)
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)}, indent=4)
+
+
+@mcp.tool()
+async def collection_edit_smart_filters(collection_title: str = None, collection_id: int = None,
+                                        library_name: str = None, filters: dict = None,
+                                        sort: str = None, limit: int = None, libtype: str = None) -> str:
+    """Update the filter definition of an existing smart collection.
+
+    This replaces the smart collection's search criteria; Plex re-evaluates it immediately.
+    Only works on smart collections - use collection_edit for a regular collection's attributes.
+
+    Args:
+        collection_title: Title of the smart collection to edit (optional if collection_id is provided)
+        collection_id: ID of the smart collection to edit (optional if collection_title is provided)
+        library_name: Name of the library containing the collection (required if using collection_title)
+        filters: New advanced filters as a dict, e.g. {"genre": "Drama", "year>>": 2010}.
+            See library_get_smart_filter_options for available fields, operators, and values.
+        sort: New sort field(s), e.g. "addedAt:desc"
+        limit: New maximum number of items in the collection
+        libtype: Content type to filter (movie, show, season, episode, artist, album, track, photo)
+    """
+    try:
+        plex = connect_to_plex()
+
+        collection, error_response = _resolve_collection(plex, collection_title, collection_id, library_name)
+        if error_response is not None:
+            return error_response
+
+        if not getattr(collection, 'smart', False):
+            return json.dumps({
+                "status": "error",
+                "message": f"Collection '{collection.title}' is not a smart collection; its filters cannot be edited"
+            }, indent=4)
+
+        try:
+            collection.updateFilters(libtype=libtype, limit=limit, sort=sort, filters=filters)
+        except BadRequest as e:
+            return json.dumps({"status": "error", "message": f"Invalid smart collection filters: {str(e)}"}, indent=4)
+
+        collection.reload()
+        return json.dumps({
+            "status": "success",
+            "message": f"Smart collection '{collection.title}' filters updated successfully",
+            "data": {
+                "title": collection.title,
+                "id": collection.ratingKey,
+                "item_count": collection.childCount if hasattr(collection, 'childCount') else None
+            }
+        }, indent=4)
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)}, indent=4)

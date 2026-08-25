@@ -957,94 +957,20 @@ def _resolve_playlist(plex, playlist_title: str = None, playlist_id: int = None)
 
 
 @mcp.tool()
-async def playlist_get_smart_filter_options(library_name: str, field: str = None) -> str:
-    """Discover the filter and sort options for building a smart playlist in a library.
-
-    A smart playlist is a saved search over a single library that Plex keeps
-    auto-populated. Use this tool to learn what you can filter and sort on before
-    calling playlist_create_smart or playlist_edit_smart_filters.
-
-    Args:
-        library_name: Name of the library section to inspect (e.g. 'Movies', 'TV Shows', 'Music')
-        field: Optional filter field (e.g. 'genre', 'contentRating'). When provided, returns the
-            valid values (choices) for that field instead of the overall schema. Useful for tag
-            fields where you need the exact value to filter on.
-    """
-    try:
-        plex = connect_to_plex()
-        try:
-            section = plex.library.section(library_name)
-        except NotFound:
-            return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
-
-        # Field-choices mode: list the valid values for a single field
-        if field:
-            try:
-                choices = section.listFilterChoices(field)
-            except Exception as e:
-                return json.dumps({"error": f"Could not get choices for field '{field}': {str(e)}"}, indent=4)
-            values = [{"title": c.title, "value": c.key} for c in choices]
-            return json.dumps({
-                "library": section.title,
-                "field": field,
-                "count": len(values),
-                "choices": values
-            }, indent=4)
-
-        # Schema mode: list available filter fields (with operators) and sort fields
-        filters = []
-        for f in section.listFilters():
-            try:
-                operators = [o.key for o in section.listOperators(f.filterType)]
-            except Exception:
-                operators = []
-            filters.append({
-                "field": f.filter,
-                "title": f.title,
-                "type": f.filterType,
-                "operators": operators
-            })
-
-        sorts = []
-        for s in section.listSorts():
-            sorts.append({
-                "field": s.key,
-                "title": s.title,
-                "defaultDirection": s.defaultDirection
-            })
-
-        return json.dumps({
-            "library": section.title,
-            "default_libtype": section.METADATA_TYPE,
-            "filters": filters,
-            "sorts": sorts,
-            "usage": (
-                "Pass filters to playlist_create_smart as a dict, e.g. "
-                '{"genre": "Comedy", "year>>": 2000, "unwatched": true}. '
-                "Append an operator suffix from a field's 'operators' list to the field name "
-                "for comparisons (e.g. 'year>>' means after that year). Call this tool again "
-                "with a 'field' argument to list the valid values for a tag field."
-            )
-        }, indent=4)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, indent=4)
-
-
-@mcp.tool()
 async def playlist_create_smart(playlist_title: str, library_name: str, filters: dict = None,
                                 sort: str = None, limit: int = None, libtype: str = None,
                                 summary: str = None) -> str:
     """Create a smart playlist that Plex keeps auto-populated from a library search.
 
     Unlike playlist_create (a fixed list of items), a smart playlist is a saved filter
-    scoped to a single library section. Use playlist_get_smart_filter_options first to
+    scoped to a single library section. Use library_get_smart_filter_options first to
     discover the available filter fields, operators, sort fields, and valid values.
 
     Args:
         playlist_title: Title for the new smart playlist
         library_name: Library section the playlist is built from (smart playlists are single-section)
         filters: Advanced filters as a dict, e.g. {"genre": "Comedy", "year>>": 2000, "unwatched": true}.
-            Append an operator suffix (see playlist_get_smart_filter_options) to a field for comparisons.
+            Append an operator suffix (see library_get_smart_filter_options) to a field for comparisons.
         sort: Sort field(s), e.g. "addedAt:desc" or "year:asc". Comma-separate multiple fields.
         limit: Maximum number of items in the playlist
         libtype: Content type to filter (movie, show, season, episode, artist, album, track, photo).
@@ -1107,7 +1033,7 @@ async def playlist_edit_smart_filters(playlist_title: str = None, playlist_id: i
         playlist_title: Title of the smart playlist to edit (optional if playlist_id is provided)
         playlist_id: ID of the smart playlist to edit (optional if playlist_title is provided)
         filters: New advanced filters as a dict, e.g. {"genre": "Drama", "year>>": 2010}.
-            See playlist_get_smart_filter_options for available fields, operators, and values.
+            See library_get_smart_filter_options for available fields, operators, and values.
         sort: New sort field(s), e.g. "addedAt:desc"
         limit: New maximum number of items in the playlist
     """

@@ -102,6 +102,7 @@ Tools for exploring and managing your Plex libraries.
 | `library_get_details` | Gets detailed information about a library. | `library_name` |
 | `library_get_recently_added` | Lists recently added items in a library. | `library_name`, `limit: int` |
 | `library_get_contents` | Lists all items in a library. | `library_name`, `limit: int` |
+| `library_get_smart_filter_options` | Discover a library's filter fields, operators, sort options (and per-field values) for building smart playlists and smart collections. | `library_name`, `field` |
 
 ### Media Module
 Tools for searching, inspecting, and editing specific media items.
@@ -130,7 +131,6 @@ Manage your personal and shared playlists.
 | `playlist_edit` | Change playlist title or summary. | `playlist_title`, `new_title`, `new_summary`, `playlist_id` |
 | `playlist_upload_poster` | Upload a custom poster image. | `playlist_title`, `image_path`, `playlist_id` |
 | `playlist_copy_to_user` | Share/Copy a playlist to another user. | `playlist_title`, `username`, `playlist_id` |
-| `playlist_get_smart_filter_options` | Discover filter fields, operators, sort options (and per-field values) for building a smart playlist. | `library_name`, `field` |
 | `playlist_create_smart` | Create a smart playlist that auto-populates from a library filter. | `playlist_title`, `library_name`, `filters: dict`, `sort`, `limit`, `libtype`, `summary` |
 | `playlist_edit_smart_filters` | Update an existing smart playlist's filter definition. | `playlist_title`, `playlist_id`, `filters: dict`, `sort`, `limit` |
 
@@ -138,7 +138,7 @@ Manage your personal and shared playlists.
 
 Smart playlists are saved searches over a **single library** that Plex keeps auto-populated, rather than a fixed list of items. The typical flow:
 
-1. Call `playlist_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. Call it again with a `field` (e.g. `genre`) to list that field's valid values.
+1. Call `library_get_smart_filter_options` for the target library to see which fields you can filter/sort on and their operators. Call it again with a `field` (e.g. `genre`) to list that field's valid values.
 2. Call `playlist_create_smart` with a `filters` dict, e.g. `{"genre": "Comedy", "year>>": 2000, "unwatched": true}`. Append an operator suffix to a field name for comparisons (`year>>` means after that year).
 3. Read the current definition anytime with `playlist_get_contents` — for a smart playlist it returns `smart: true` and a `smartFilter` object (`libtype`, `sort`, `limit`, `filters`).
 4. Adjust later with `playlist_edit_smart_filters` (it overwrites the filter definition, so read it first if you want to build on the existing one).
@@ -150,12 +150,25 @@ Organize movies and shows into collections.
 
 | Command | Description | Parameters |
 |---------|-------------|------------|
-| `collection_list` | List collections in a specific library. | `library_name` |
+| `collection_list` | List collections in a library; for smart collections also returns the current `smartFilter` definition. | `library_name` |
 | `collection_create` | Create a new collection. | `library_name`, `title`, `items: List[str]` |
 | `collection_add_to` | Add items to an existing collection. | `library_name`, `collection_title`, `items: List[str]`, `collection_id` |
 | `collection_remove_from` | Remove items from a collection. | `library_name`, `collection_title`, `items: List[str]`, `collection_id` |
 | `collection_edit` | Edit collection metadata and settings. | `collection_title`, `collection_id`, `library_name`, `new_title`, `new_sort_title`, `new_summary`, `new_content_rating`, `new_labels`, `add_labels`, `remove_labels`, `poster_path`, `poster_url`, `background_path`, `background_url`, `new_advanced_settings` |
 | `collection_delete` | Delete a collection. | `collection_title`, `collection_id`, `library_name` |
+| `collection_create_smart` | Create a smart collection that auto-populates from a library filter. | `collection_title`, `library_name`, `filters: dict`, `sort`, `limit`, `libtype`, `summary` |
+| `collection_edit_smart_filters` | Update an existing smart collection's filter definition. | `collection_title`, `collection_id`, `library_name`, `filters: dict`, `sort`, `limit`, `libtype` |
+
+#### Smart collections
+
+Smart collections work exactly like smart playlists — a saved filter over a **single library** that Plex keeps auto-populated — and share the same filter vocabulary:
+
+1. Call `library_get_smart_filter_options` for the target library to discover filter fields, operators, and sort options (add a `field` argument to list a field's valid values).
+2. Call `collection_create_smart` with a `filters` dict, e.g. `{"genre": "Comedy", "year>>": 2000}`.
+3. Read the current definition anytime with `collection_list` — smart collections include a `smartFilter` object alongside `is_smart`.
+4. Adjust later with `collection_edit_smart_filters` (it overwrites the filter definition, so read it first if you want to build on the existing one).
+
+> **Note:** `collection_list` only reports collections from movie and TV libraries, so a smart collection created in a music library won't appear there (though it is still created on the server).
 
 ### User Module
 Information about the server owner and shared users.
