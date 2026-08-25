@@ -289,6 +289,27 @@ def create_streamable_http_app(debug: bool = False):
     mcp.settings.stateless_http = True
     mcp.settings.streamable_http_path = "/mcp"
 
+    # DNS-rebinding (Host header) protection. FastMCP defaults to allowing only
+    # localhost, which rejects any request forwarded by a reverse proxy / MCP gateway
+    # with a 421 "Invalid Host header". Since this server is fronted by a trusted,
+    # authenticated gateway, allow the proxied host(s): set MCP_ALLOWED_HOSTS to a
+    # comma-separated allowlist to keep the check on, or leave it unset to disable the
+    # browser-oriented Host check for proxied deployments.
+    from mcp.server.transport_security import TransportSecuritySettings
+    allowed_hosts_env = os.environ.get("MCP_ALLOWED_HOSTS", "").strip()
+    if allowed_hosts_env:
+        hosts = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()]
+        origins = [f"http://{h}" for h in hosts] + [f"https://{h}" for h in hosts]
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts + ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+            allowed_origins=origins + ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        )
+    else:
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
+
     # FastMCP builds the /mcp route together with the session-manager lifespan; keep that app
     # so its lifespan runs, and layer our OAuth routes/middleware on top.
     app = mcp.streamable_http_app()
